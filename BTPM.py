@@ -4,7 +4,7 @@ from numpy.random import Generator, MT19937
 import pandas as pd
 from scipy.spatial import distance
 from math import exp
-
+from sklearn.datasets import load_iris
 
 class tp_miner_t:
     def __init__(self, training_set, cov_mat, dist_threshold):
@@ -194,24 +194,29 @@ class btpm_t:
 def test():
     import matplotlib.pyplot as plt 
     
-    #np.random.seed(0)
-    training_set = np.random.rand(150,2)/2
-    X = training_set[:, 0]
-    Y = training_set[:, 1]
-    btpm = btpm_t(training_set, 100, 0.15)
-    
-    btpm.train()
-    x = np.linspace(-2, 2, 80)
-    y = np.linspace(-2, 2, 80)
-    xx, yy = np.meshgrid(x, y)
+    features, target = load_iris(return_X_y=True)
+    features_a, target_a = features[:50], target[:50]
+    features_b, target_b = features[50:], target[50:]
+    btpm = btpm_t(features_a[:40], 50, 0.15)
 
-    predict = lambda x, y: btpm.predict(np.array([x, y]))
-    predict = np.vectorize(predict)
-    z = predict(xx, yy)
-    cl = plt.contour(xx, yy, z, cmap=plt.cm.Greys, linewidths=0.5, linestyles="dashed")
-    plt.clabel(cl, fontsize=8)
-    plt.scatter(X, Y, alpha=0.3, color="black")
-    plt.show()
+    btpm.train()
+    test = np.concatenate((features_a[40:], features_b))
+    for i, f in enumerate(test):
+        print(i, btpm.predict(f) > 0.1)
+        
+
+    # x = np.linspace(-2, 2, 80)
+    # y = np.linspace(-2, 2, 80)
+    # xx, yy = np.meshgrid(x, y)
+
+    # predict = lambda x, y: btpm.predict(np.array([x, y]))
+    # predict = np.vectorize(predict)
+    # z = predict(xx, yy)
+    # cl = plt.contour(xx, yy, z, cmap=plt.cm.Greys, linewidths=0.5, linestyles="dashed")
+    # plt.clabel(cl, fontsize=8)
+    # plt.scatter(X, Y, alpha=0.3, color="black")
+    # plt.axis("off")
+    # plt.show()
 
 if __name__ == "__main__":
     test()
