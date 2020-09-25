@@ -12,9 +12,8 @@ class tp_miner_t:
         self._cm = inv(cov_mat)
         self._dt = dist_threshold
         
-        self._supported_objs = list()
         self._typical_objs = list()
-        self._typical_objs_idx = list()
+        self._supported_objs = set()
         self._trained = False
 
         
@@ -31,14 +30,13 @@ class tp_miner_t:
         """ Search for typical objects in training set until all objects become
             a typical object or a supported object.
         """
-        while len(self._supported_objs) + len(self._typical_objs) < len(self._ts):
+        while len(self._supported_objs) < len(self._ts):
             i, supported_objects = self.get_most_typical()
             most_tipical_object = self._ts[i]
 
             # add the objects supported by most typical objects to supported set
-            self._typical_objs.append(most_tipical_object)
-            self._typical_objs_idx.append(i)
-            self._supported_objs.extend(supported_objects)
+            self._typical_objs.append(np.array(most_tipical_object))
+            self._supported_objs.update(supported_objects)
 
             
     def get_most_typical(self):
@@ -46,8 +44,9 @@ class tp_miner_t:
         typicality = list()
         
         for i, obj in enumerate(self._ts):
-            if i in self._supported_objects:
-                continue # TODO fix bug.
+            if i in self._supported_objs: # ignore already supported objects
+                continue
+            
             closer_objects = self.get_closer_objects(obj)
             tp = sum([exp(-0.5*(d/self._dt)**2) for _, d in closer_objects])
             
@@ -60,7 +59,7 @@ class tp_miner_t:
         # returns the index to the most tipical object and supported objects
         most_typical = typicality[0]
         index = most_typical[1]
-        supported_objects = [i for i, dist in most_typical[2]]
+        supported_objects = set([i for i, dist in most_typical[2]])
         return index, supported_objects
 
     
@@ -71,17 +70,14 @@ class tp_miner_t:
         closer_objects = list()
         
         for i, similar_obj in enumerate(self._ts):
-            # ignore itself
-            # if i in self._supported_objs or i in self._typical_objs_idx:
-            #    continue
-                
+            if id(obj) == id(similar_obj):
+                continue
+            
             dist = distance.mahalanobis(obj, similar_obj, self._cm)
-            if dist < self._dt:
+            if dist <= self._dt:
                 # save index instead of object to save memory and dist to save
                 # of another expensive computation.
-                closer_objects.append([i, dist])
-
-        closer_objects = np.array(closer_objects)
+                closer_objects.append((i, dist))
 
         return closer_objects
 
@@ -102,7 +98,7 @@ class btpm_t:
         self._ts = pd.DataFrame(data=training_set)
         self._n = n
         self._ratio = sample_prop
-        self._seed = seed
+        self._rd = Generator(MT19937(seed))
         self._q_size = q_size
 
         self._past_votes = list()
@@ -113,10 +109,10 @@ class btpm_t:
     def train(self, force=False):
         """ Train if not yet trained or if forced """
         if not self._trained or force:
-            self.train_classifier()
+            self.train_inner_classifiers()
 
             
-    def train_classifier(self):
+    def train_inner_classifiers(self):
         """ Train each inner classifier """
         for i in range(self._n):
             training_set = self.bootstrap() # sample from dataset
@@ -145,8 +141,11 @@ class btpm_t:
         avg_past_votes = self.avg_past_votes()
 
         self.update_past_votes(avg_votes)
-        
-        return (avg_votes + avg_past_votes) / 2 
+
+        if self._q_size == 0:
+            return avg_votes
+        else:
+            return (avg_votes + avg_past_votes) / 2
 
     
     def avg_past_votes(self):
@@ -158,12 +157,12 @@ class btpm_t:
     def update_past_votes(self, new_vote):
         self._past_votes.append(new_vote)
 
-        if len(self._past_votes) <= self._q_size:
+        if len(self._past_votes) >= self._q_size:
             self._past_votes.pop()
-
             
     def bootstrap(self):
-        t_set = self._ts.sample(frac=self._ratio, random_state=self._seed)
+        t_set = self._ts.sample(frac=self._ratio,
+                                random_state=self._rd.integers(self._n))
         t_set = np.array(t_set)
         return t_set
 
@@ -185,6 +184,7 @@ class btpm_t:
                 v = training_set[j]
 
                 dist = distance.mahalanobis(u, v, i_cov)
+
                 distances.append(dist)
 
         return sum(distances)/len(distances)
@@ -193,22 +193,24 @@ class btpm_t:
 
 def test():
     import matplotlib.pyplot as plt 
-    np.random.seed(0)
-    training_set = np.random.rand(100,2)/5 + 0.5
+    
+    #np.random.seed(0)
+    training_set = np.random.rand(150,2)/2
     X = training_set[:, 0]
     Y = training_set[:, 1]
-    btpm = btpm_t(training_set, 15, 0.3)
+    btpm = btpm_t(training_set, 100, 0.15)
     
     btpm.train()
-    x = np.linspace(0, 1, 80)
-    y = np.linspace(0, 1, 80)
+    x = np.linspace(-2, 2, 80)
+    y = np.linspace(-2, 2, 80)
     xx, yy = np.meshgrid(x, y)
-    z = np.zeros(shape=(80, 80))
-    for i, xv in enumerate(x):
-        for j, yv in enumerate(y):
-            z[i, j] = 1 - btpm.predict(np.array([xv, yv]))
-    plt.scatter(xx, yy, c=z)
-    plt.scatter(X, Y, s=0.5, color="red")
+
+    predict = lambda x, y: btpm.predict(np.array([x, y]))
+    predict = np.vectorize(predict)
+    z = predict(xx, yy)
+    cl = plt.contour(xx, yy, z, cmap=plt.cm.Greys, linewidths=0.5, linestyles="dashed")
+    plt.clabel(cl, fontsize=8)
+    plt.scatter(X, Y, alpha=0.3, color="black")
     plt.show()
 
 if __name__ == "__main__":
